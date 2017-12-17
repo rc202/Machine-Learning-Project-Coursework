@@ -1,0 +1,189 @@
+---
+title: 'Peer-graded Assignment: Prediction Assignment Writeup'
+author: "R. Camara"
+date: "17 December 2017"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+    self_contained: no
+---
+
+# Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website [here](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+The training data for this project are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) 
+
+The test data are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+# Data rocessing
+
+## Packages
+```{r setup, warning=FALSE, error=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(width=120)
+library(caret)
+library(pander)
+library(randomForest)
+library(corrplot)
+```
+
+## Loading and cacheing the data
+```{r, cache=TRUE}
+training.data <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testing.data <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+If we look in Appendix A we can see that there is a large number of NA values so we will clean the dataset to begin with.
+
+## Partitioning with the training set
+```{r, cache=TRUE}
+in.train  <- createDataPartition(training.data$classe, p=0.7, list=FALSE)
+training.data.cl <- training.data[in.train, ]
+testing.data.cl  <- training.data[-in.train, ]
+```
+
+## Removing the near-zero variance predictors
+```{r, cache=TRUE}
+nzv <- nearZeroVar(training.data.cl, saveMetrics = T)
+training.data.cl <- training.data.cl[, !nzv$nzv] 
+testing.data.cl <- testing.data.cl[, !nzv$nzv]
+```
+
+## Getting rid of NA columns
+```{r, cache=TRUE}
+nas <- (colSums(is.na(training.data.cl)) == 0)
+training.data.cl <- training.data.cl[, nas]
+testing.data.cl <- testing.data.cl[, nas]
+```
+
+## Removing the user & time data
+```{r, cache=TRUE}
+training.data.cl <- training.data.cl[ , -c(1:5)]
+testing.data.cl <- testing.data.cl[ , -c(1:5)]
+```
+
+# Modeling: prediction model building
+
+## Verifying correlation analysis
+```{r, cache=TRUE, fig.width=20, fig.height=20}
+cor.matrix <- cor(training.data.cl[, -54])
+corrplot(cor.matrix, order="FPC", tl.cex=0.75, method="color", tl.col="black", tl.srt = 45, type="lower", diag = FALSE)
+```
+
+## Model selection
+The highly correlated variables are shown in dark colours in the graph above. A PCA analysis won't be performed due to the rather sparse nature of the correlations.
+
+Both a GBM and RF model will be trained and the the results compared.
+
+## Training a generalised boosted model
+```{r, gbm1, cache=TRUE}
+set.seed(56346)
+
+GBM.ctl <-
+  trainControl(method = "repeatedcv",
+               number = 5,
+               repeats = 1)
+
+GBM.fit  <-
+  train(
+    classe ~ .,
+    data = training.data.cl,
+    method = "gbm",
+    trControl = GBM.ctl,
+    verbose = FALSE
+  )
+
+GBM.fit$finalModel
+```
+
+## Verifying the GBM Model
+```{r, gbm2, cache=TRUE}
+GBM.predict <- predict(GBM.fit, newdata = testing.data.cl)
+GBM.cfx <- confusionMatrix(GBM.predict, testing.data.cl$classe)
+GBM.cfx
+```
+
+```{r, gbm3}
+plot(GBM.cfx$table,
+     col = GBM.cfx$byClass,
+     main = paste("GBM - Accuracy =", round(GBM.cfx$overall['Accuracy'], 4)))
+```
+
+
+## Training a random forest model
+```{r, rf1, cache=TRUE}
+set.seed(56346)
+random.forest.ctl <-
+  trainControl(method = "cv",
+               number = 3,
+               verboseIter = FALSE)
+
+random.forest.fit <-
+  train(classe ~ .,
+        data = training.data.cl,
+        method = "rf",
+        trControl = random.forest.ctl)
+
+random.forest.fit$finalModel
+```
+
+## Verifying the random forest model
+```{r, rf2, cache=TRUE}
+random.forest.predict <-
+  predict(random.forest.fit, newdata = testing.data.cl)
+random.forest.cfx <-
+  confusionMatrix(random.forest.predict, testing.data.cl$classe)
+random.forest.cfx
+```
+
+```{r, rf3, cache=TRUE}
+plot(
+  random.forest.cfx$table,
+  col = random.forest.cfx$byClass,
+  main = paste(
+    "Random Forest - Accuracy =",
+    round(random.forest.cfx$overall['Accuracy'], 4)
+  )
+)
+```
+
+# Conclusion & running prediction against the teststing data
+
+We will use the the random forest model as it has the highest accuracy of 0.9973 and OOB estimate of error rate 0.23% 
+
+```{r, rf, cache=TRUE}
+predict.test <- predict(random.forest.fit, newdata = testing.data)
+predict.test
+```
+
+
+# Appendix A_testing dataset
+
+## Pre-cleaning the data
+```{r, explore1}
+str(training.data)
+```
+
+## Post-cleaning the data
+```{r, explore2}
+str(training.data.cl)
+```
+
+# Appendix B_required packages
+Package  | Description       
+------------- | -------------
+caret  | [caret package](https://cran.r-project.org/web/packages/caret/caret.pdf) 
+pander  | [pander package](https://cran.r-project.org/web/packages/pander/pander.pdf) 
+randomForest | [randomForest](https://cran.r-project.org/web/packages/randomForest/randomForest.pdf) 
+corrplot | [corrplot](https://cran.r-project.org/web/packages/corrplot/corrplot.pdf) 
+
+
+# Appendix C_session info package versions
+```{r echo=TRUE, message=FALSE}
+sessionInfo()
+```
+
+# References
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
